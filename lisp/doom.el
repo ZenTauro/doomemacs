@@ -54,7 +54,8 @@
 ;;   - hook: `window-setup-hook'
 ;;   - hook: `doom-init-ui-hook'
 ;;   - hook: `doom-after-init-hook'
-;;   > After startup is complete:
+;;   > After startup is complete (if file(s) have been opened from the command
+;;     line, these will trigger much earlier):
 ;;     - On first input:              `doom-first-input-hook'
 ;;     - On first switched-to buffer: `doom-first-buffer-hook'
 ;;     - On first opened file:        `doom-first-file-hook'
@@ -121,7 +122,8 @@
     ('darwin                           '(macos bsd))
     ((or 'cygwin 'windows-nt 'ms-dos)  '(windows))
     ((or 'gnu 'gnu/linux)              '(linux))
-    ((or 'gnu/kfreebsd 'berkeley-unix) '(linux bsd)))
+    ((or 'gnu/kfreebsd 'berkeley-unix) '(linux bsd))
+    ('android                          '(android)))
   "A list of symbols denoting available features in the active Doom profile.")
 
 ;; Convenience aliases for internal use only (may be removed later).
@@ -148,8 +150,9 @@
     (push 'harfbuzz features))
 
 ;; The `native-compile' feature exists whether or not it is functional (e.g.
-;; libgcc is available or not). This seems silly, so pretend it doesn't exist if
-;; it isn't functional.
+;; libgcc is available or not). This seems silly, as some packages will blindly
+;; use the native-comp API if it's present, whether or not it's functional. so
+;; pretend it doesn't exist if that's the case.
 (if (featurep 'native-compile)
     (if (not (native-comp-available-p))
         (delq 'native-compile features)))
@@ -193,7 +196,7 @@
 ;;; Core globals
 
 (defgroup doom nil
-  "An Emacs framework for the stubborn martian hacker."
+  "A development framework for Emacs configurations and Emacs Lisp projects."
   :link '(url-link "https://doomemacs.org")
   :group 'emacs)
 
@@ -201,11 +204,11 @@
   "Current version of Doom Emacs core.")
 
 ;; DEPRECATED: Remove these when the modules are moved out of core.
-(defconst doom-modules-version "24.08.0-pre"
+(defconst doom-modules-version "24.10.0-pre"
   "Current version of Doom Emacs.")
 
 (defvar doom-init-time nil
-  "The time it took, in seconds, for Doom Emacs to initialize.")
+  "The time it took, in seconds (as a float), for Doom Emacs to start up.")
 
 (defconst doom-profile
   (if-let (profile (getenv-internal "DOOMPROFILE"))
@@ -246,6 +249,12 @@
 Defaults to ~/.config/doom, ~/.doom.d or the value of the DOOMDIR envvar;
 whichever is found first. Must end in a slash.")
 
+(defvar doom-bin-dir (expand-file-name "bin/" doom-emacs-dir)
+  "Where Doom's executables are stored.
+
+Defaults to $EMACSDIR/bin, where $EMACSDIR is `doom-emacs-dir'. Must end in a
+slash.")
+
 ;; DEPRECATED: .local will be removed entirely in 3.0
 (defvar doom-local-dir
   (if-let (localdir (getenv-internal "DOOMLOCALDIR"))
@@ -262,7 +271,7 @@ These files should not be shared across systems. By default, it is used by
 (defvar doom-data-dir
   (if doom-profile
       (if doom--system-windows-p
-          (expand-file-name "doomemacs/data/" (getenv-internal "APPDATA"))
+          (expand-file-name "doomemacs/data/" (getenv-internal "LOCALAPPDATA"))
         (expand-file-name "doom/" (or (getenv-internal "XDG_DATA_HOME") "~/.local/share")))
     ;; DEPRECATED: .local will be removed entirely in 3.0
     (file-name-concat doom-local-dir "etc/"))
@@ -281,7 +290,7 @@ For profile-local data files, use `doom-profile-data-dir' instead.")
 (defvar doom-cache-dir
   (if doom-profile
       (if doom--system-windows-p
-          (expand-file-name "doomemacs/cache/" (getenv-internal "APPDATA"))
+          (expand-file-name "doomemacs/cache/" (getenv-internal "LOCALAPPDATA"))
         (expand-file-name "doom/" (or (getenv-internal "XDG_CACHE_HOME") "~/.cache")))
     ;; DEPRECATED: .local will be removed entirely in 3.0
     (file-name-concat doom-local-dir "cache/"))
@@ -300,17 +309,17 @@ For profile-local cache files, use `doom-profile-cache-dir' instead.")
 (defvar doom-state-dir
   (if doom-profile
       (if doom--system-windows-p
-          (expand-file-name "doomemacs/state/" (getenv-internal "APPDATA"))
+          (expand-file-name "doomemacs/state/" (getenv-internal "LOCALAPPDATA"))
         (expand-file-name "doom/" (or (getenv-internal "XDG_STATE_HOME") "~/.local/state")))
     ;; DEPRECATED: .local will be removed entirely in 3.0
     (file-name-concat doom-local-dir "state/"))
   "Where Doom stores its global state files.
 
-State files contain unessential, unportable, but persistent data which, if lost
-won't cause breakage, but may be inconvenient as they cannot be automatically
-regenerated or restored. For example, a recently-opened file list is not
-essential, but losing it means losing this record, and restoring it requires
-revisiting all those files.
+State files contain unessential, non-portable, but persistent data which, if
+lost won't cause breakage, but may be inconvenient as they cannot be
+automatically regenerated or restored. For example, a recently-opened file list
+is not essential, but losing it means losing this record, and restoring it
+requires revisiting all those files.
 
 Use this for: history, logs, user-saved data, autosaves/backup files, known
 projects, recent files, bookmarks.
@@ -332,7 +341,7 @@ For profile-local state files, use `doom-profile-state-dir' instead.")
 
 (defconst doom-profile-dir
   (file-name-concat doom-profile-data-dir "@" (cdr doom-profile))
-  "Where generated files for the active profile are kept.")
+  "Where generated files for the active profile (for Doom's core) are kept.")
 
 ;; DEPRECATED: Will be moved to cli/env
 (defconst doom-env-file
@@ -366,21 +375,26 @@ users).")
   (let ((old-value (default-toplevel-value 'file-name-handler-alist)))
     (set-default-toplevel-value
      'file-name-handler-alist
-     ;; HACK: The libraries bundled with Emacs can either be compiled,
-     ;;   compressed, or neither. We use calc-loaddefs.el as a heuristic to
-     ;;   guess what state all these libraries are in. If they're compressed, we
-     ;;   need to leave the gzip file handler in `file-name-handler-alist' so
-     ;;   Emacs knows how to load them. If they're compiled or neither, we can
-     ;;   omit the gzip handler altogether (at least during startup) for a boost
-     ;;   in startup and package load time.
+     ;; HACK: The elisp libraries bundled with Emacs are either compressed or
+     ;;   not, never both. So if calc-loaddefs.el.gz exists, calc-loaddefs.el
+     ;;   won't, and vice versa. This heuristic is used to guess the state of
+     ;;   all other built-in (or site); if they're compressed, we must leave the
+     ;;   gzip file handler in `file-name-handler-alist' so Emacs knows how to
+     ;;   load them. Otherwise, we can omit it (at least during startup) for a
+     ;;   boost in package load time.
      (if (eval-when-compile
            (locate-file-internal "calc-loaddefs.el" load-path))
          nil
        (list (rassq 'jka-compr-handler old-value))))
-    ;; Make sure the new value survives any current let-binding.
-    (set-default-toplevel-value 'file-name-handler-alist file-name-handler-alist)
     ;; Remember it so it can be reset where needed.
     (put 'file-name-handler-alist 'initial-value old-value)
+    ;; COMPAT: Eventually, Emacs will process any files passed to it via the
+    ;;   command line, and will do so *really* early in the startup process.
+    ;;   These might contain special file paths like TRAMP paths, so restore
+    ;;   `file-name-handler-alist' just for this portion of startup.
+    (define-advice command-line-1 (:around (fn args-left) respect-file-handlers)
+      (let ((file-name-handler-alist (if args-left old-value file-name-handler-alist)))
+        (funcall fn args-left)))
     ;; COMPAT: ...but restore `file-name-handler-alist' later, because it is
     ;;   needed for handling encrypted or compressed files, among other things.
     (add-hook! 'emacs-startup-hook :depth 101
@@ -393,10 +407,10 @@ users).")
 
   (unless noninteractive
     ;; PERF: Resizing the Emacs frame (to accommodate fonts that are smaller or
-    ;;   larger than the system font) appears to impact startup time
+    ;;   larger than the default system font) can impact startup time
     ;;   dramatically. The larger the delta, the greater the delay. Even trivial
-    ;;   deltas can yield up to a ~1000ms loss, depending on font size and
-    ;;   `window-system'. PGTK seems least affected and NS/MAC the most.
+    ;;   deltas can yield up to a ~1000ms loss, depending also on
+    ;;   `window-system' (PGTK builds seem least affected and NS/MAC the most).
     (setq frame-inhibit-implied-resize t)
 
     ;; PERF: A fair bit of startup time goes into initializing the splash and
@@ -432,14 +446,14 @@ users).")
                                 (selected-frame) nil t))))
 
     ;; PERF: `load-suffixes' and `load-file-rep-suffixes' are consulted on each
-    ;;   `require' and `load'. Doom won't load any modules this early, so omit
-    ;;   .so for a tiny startup boost. Is later restored in doom-start.
+    ;;   `require' and `load'. Doom won't load any modules this early, so I omit
+    ;;   *.so for a tiny startup boost. Is later restored in `doom-start'.
     (put 'load-suffixes 'initial-value (default-toplevel-value 'load-suffixes))
     (put 'load-file-rep-suffixes 'initial-value (default-toplevel-value 'load-file-rep-suffixes))
     (set-default-toplevel-value 'load-suffixes '(".elc" ".el"))
     (set-default-toplevel-value 'load-file-rep-suffixes '(""))
-    ;; COMPAT: Undo any problematic startup optimizations; from this point, I
-    ;;   make no assumptions about what might be loaded in userland.
+    ;; COMPAT: Undo any problematic startup optimizations eventually, to prevent
+    ;;   incompatibilities with anything loaded in userland.
     (add-hook! 'doom-before-init-hook
       (defun doom--reset-load-suffixes-h ()
         (setq load-suffixes (get 'load-suffixes 'initial-value)
@@ -456,29 +470,35 @@ users).")
     (add-hook! 'doom-before-init-hook
       (defun doom--reset-custom-dont-initialize-h ()
         (setq custom-dont-initialize nil)))
+    (define-advice command-line-1 (:around (fn args-left) respect-defcustom-setters)
+      (let ((custom-dont-initialize nil))
+        (funcall fn args-left)))
 
-    ;; PERF: The mode-line procs a couple dozen times during startup, before the
-    ;;   user can even see the first mode-line. This is normally fast, but we
-    ;;   can't predict what the user (or packages) will put into the mode-line.
-    ;;   Also, mode-line packages have a bad habit of throwing performance to
-    ;;   the wind, so best we just disable the mode-line until we can see one.
-    (put 'mode-line-format 'initial-value (default-toplevel-value 'mode-line-format))
-    (setq-default mode-line-format nil)
-    (dolist (buf (buffer-list))
-      (with-current-buffer buf (setq mode-line-format nil)))
-    ;; PERF,UX: Premature redisplays/redraws can substantially affect startup
-    ;;   times and/or flash a white/unstyled Emacs frame during startup, so I
-    ;;   try real hard to suppress them until we're sure the session is ready.
-    (setq-default inhibit-redisplay t
-                  inhibit-message t)
-    ;; COMPAT: If the above vars aren't reset, Emacs could appear frozen or
-    ;;   garbled after startup (or in case of an startup error).
-    (defun doom--reset-inhibited-vars-h ()
-      (setq-default inhibit-redisplay nil
-                    ;; Inhibiting `message' only prevents redraws and
-                    inhibit-message nil)
-      (redraw-frame))
-    (add-hook 'after-init-hook #'doom--reset-inhibited-vars-h)
+    ;; These optimizations are brittle, difficult to debug, and obscure other
+    ;; issues, so bow out when debug mode is on.
+    (unless init-file-debug
+      ;; PERF: The mode-line procs a couple dozen times during startup, before
+      ;;   the user even sees the first mode-line. This is normally fast, but we
+      ;;   can't predict what the user (or packages) will put into the
+      ;;   mode-line. Also, mode-line packages have a bad habit of throwing
+      ;;   performance to the wind, so best we just disable the mode-line until
+      ;;   we can see one.
+      (put 'mode-line-format 'initial-value (default-toplevel-value 'mode-line-format))
+      (setq-default mode-line-format nil)
+      (dolist (buf (buffer-list))
+        (with-current-buffer buf (setq mode-line-format nil)))
+      ;; PERF,UX: Premature redisplays/redraws can substantially affect startup
+      ;;   times and/or flash a white/unstyled Emacs frame during startup, so I
+      ;;   try real hard to suppress them until we're sure the session is ready.
+      (setq-default inhibit-redisplay t
+                    inhibit-message t)
+      ;; COMPAT: If the above vars aren't reset, Emacs could appear frozen or
+      ;;   garbled after startup (or in case of an startup error).
+      (defun doom--reset-inhibited-vars-h ()
+        (setq-default inhibit-redisplay nil
+                      inhibit-message nil)
+        (remove-hook 'post-command-hook #'doom--reset-inhibited-vars-h))
+      (add-hook 'post-command-hook #'doom--reset-inhibited-vars-h -100))
 
     ;; PERF: Doom disables the UI elements by default, so that there's less for
     ;;   the frame to initialize. However, `tool-bar-setup' is still called and
@@ -487,38 +507,36 @@ users).")
     ;;   later (see `startup--load-user-init-file@undo-hacks').
     (advice-add #'tool-bar-setup :override #'ignore)
 
-    ;; PERF,UX: site-lisp files are often obnoxiously noisy (emitting load
-    ;;   messages or other output to *Messages* or stdout). These queue
-    ;;   unnecessary redraws at startup which impact startup time depending on
-    ;;   window system. It also pollutes the logs. By suppressing it now, I can
-    ;;   load it myself, later, in a more controlled way (see
-    ;;   `startup--load-user-init-file@undo-hacks').
+    ;; PERF,UX: site-lisp files are often obnoxiously noisy (emitting output
+    ;;   that isn't useful to end-users, like load messages, deprecation
+    ;;   notices, and linter warnings). Displaying these in the minibuffer
+    ;;   causes unnecessary redraws at startup which can impact startup time
+    ;;   drastically and cause flashes of white. It also pollutes the logs. I
+    ;;   suppress it here and load it myself, later, in a more controlled way
+    ;;   (see `startup--load-user-init-file@undo-hacks').
     (put 'site-run-file 'initial-value site-run-file)
     (setq site-run-file nil)
 
-    (define-advice startup--load-user-init-file (:around (fn &rest args) undo-hacks)
+    (define-advice startup--load-user-init-file (:around (fn &rest args) undo-hacks 95)
       "Undo Doom's startup optimizations to prep for the user's session."
-      (let (init)
-        (unwind-protect
-            (progn
-              (when (setq site-run-file (get 'site-run-file 'initial-value))
-                (let ((inhibit-startup-screen inhibit-startup-screen))
-                  (letf! ((defun load-file (file) (load file nil 'nomessage))
-                          (defun load (file &optional noerror _nomessage &rest args)
-                            (apply load file noerror t args)))
-                    (load site-run-file t t))))
-              (apply fn args)  ; start up as normal
-              (setq init t))
-          (when (or (not init) init-file-had-error)
-            ;; If we don't undo our inhibit-{message,redisplay} and there's an
-            ;; error, we'll see nothing but a blank Emacs frame.
-            (doom--reset-inhibited-vars-h))
-          ;; COMPAT: Once startup is sufficiently complete, undo our earlier
-          ;;   optimizations to reduce the scope of potential edge cases.
-          (advice-remove #'tool-bar-setup #'ignore)
-          (add-transient-hook! 'tool-bar-mode (tool-bar-setup))
-          (unless (default-toplevel-value 'mode-line-format)
-            (setq-default mode-line-format (get 'mode-line-format 'initial-value))))))
+      (unwind-protect
+          (progn
+            (when (setq site-run-file (get 'site-run-file 'initial-value))
+              (let ((inhibit-startup-screen inhibit-startup-screen))
+                (letf! ((defun load-file (file)
+                          (load file nil (not init-file-debug)))
+                        (defun load (file &optional noerror _nomessage &rest args)
+                          (apply load file noerror (not init-file-debug) args)))
+                  (load site-run-file t))))
+            (apply fn args))
+        ;; Now it's safe to be verbose.
+        (setq-default inhibit-message nil)
+        ;; COMPAT: Once startup is sufficiently complete, undo our earlier
+        ;;   optimizations to reduce the scope of potential edge cases.
+        (advice-remove #'tool-bar-setup #'ignore)
+        (add-transient-hook! 'tool-bar-mode (tool-bar-setup))
+        (unless (default-toplevel-value 'mode-line-format)
+          (setq-default mode-line-format (get 'mode-line-format 'initial-value)))))
 
     ;; PERF: Unset a non-trivial list of command line options that aren't
     ;;   relevant to this session, but `command-line-1' still processes.
@@ -539,14 +557,14 @@ empty. Each context describes what phase Doom is in, and may respond to.
 
 All valid contexts:
   cli        -- while executing a Doom CLI
-  compile    -- while byte-compilation is in progress
-  eval       -- during inline evaluation of elisp
+  compile    -- while byte-compiling packages
+  eval       -- during interactive evaluation of elisp
   init       -- while doom is formally starting up for the first time, after its
-                core libraries are loaded, but before user config is.
-  modules    -- while loading modules and their files
-  sandbox    -- This session was launched from Doom's sandbox.
-  packages   -- when packagedefs are being read
-  reload     -- while reloading doom")
+                core libraries are loaded, but before $DOOMDIR is
+  modules    -- while loading modules configuration files (but not packages)
+  sandbox    -- This session was launched from Doom's sandbox
+  packages   -- while a module's packages.el's file is being evaluated
+  reload     -- while reloading doom with `doom/reload'")
 (put 'doom-context 'valid-values '(cli compile eval init modules packages reload doctor sandbox))
 (put 'doom-context 'risky-local-variable t)
 
@@ -557,7 +575,9 @@ All valid contexts:
               (list context "Unrecognized context" valid)))))
 
 (defun doom-context-p (context)
-  "Return t if CONTEXT is active (i.e. in `doom-context')."
+  "Return t if CONTEXT is active, nil otherwise.
+
+See `doom-context' for possible values for CONTEXT."
   (if (memq context doom-context) t))
 
 (defun doom-context-push (context)
@@ -751,7 +771,7 @@ appropriately against `noninteractive' or the `cli' context."
 ;;; Last minute initialization
 
 (when (daemonp)
-  (message "Starting Doom Emacs in daemon mode!")
+  (message "Starting Doom Emacs in daemon mode...")
   (unless doom-inhibit-log
     (add-hook! 'doom-after-init-hook :depth 106
       (unless doom-inhibit-log
@@ -772,8 +792,8 @@ appropriately against `noninteractive' or the `cli' context."
     (when (doom-context-push 'init)
       ;; HACK: Ensure OS checks are as fast as possible (given their ubiquity).
       (setq features (cons :system (delq :system features)))
-      ;; Remember these variables' initial values, so we can safely reset them at
-      ;; a later time, or consult them without fear of contamination.
+      ;; Remember these variables' initial values, so we can safely reset them
+      ;; at a later time, or consult them without fear of contamination.
       (dolist (var '(exec-path load-path process-environment))
         (put var 'initial-value (default-toplevel-value var))))))
 

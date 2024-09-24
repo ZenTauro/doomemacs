@@ -6,7 +6,7 @@
   :pin "17cfa1b54800fdef2975c0c0531dad34846a5065")
 (package! compat
   :recipe (:host github :repo "emacs-compat/compat")
-  :pin "80dbd9bc5efee05a479663f8cfd0cc9e0a30dac5")
+  :pin "e9203e164903a6bb7de3e58aa0d653bbcff9d3d1")
 (package! gcmh
   :pin "0089f9c3a6d4e9a310d0791cf6fa8f35642ecfd9")
 
@@ -21,23 +21,22 @@
   :pin "88e574ae75344e39b436f863ef0344135c7b6517")
 
 ;; doom-ui.el
-(package! nerd-icons :pin "4322290303f2e12efd5685a0d22d76ed76ec7349")
-(package! hide-mode-line :pin "bc5d293576c5e08c29e694078b96a5ed85631942")
+(package! nerd-icons :pin "c3d641d8e14bd11b5f98372da34ee5313636e363")
+(package! hide-mode-line :pin "ddd154f1e04d666cd004bf8212ead8684429350d")
 (package! highlight-numbers :pin "8b4744c7f46c72b1d3d599d4fb75ef8183dee307")
 (package! rainbow-delimiters :pin "f40ece58df8b2f0fb6c8576b527755a552a5e763")
 (package! restart-emacs :pin "1607da2bc657fe05ae01f7fdf26f716eafead02c")
 
 ;; doom-editor.el
 (package! better-jumper :pin "47622213783ece37d5337dc28d33b530540fc319")
-(package! dtrt-indent :pin "939c5e374ac0175bb7d561542e22e47a72d04aa8")
-(package! helpful :pin "4ba24cac9fb14d5fdc32582cd947572040e82b2c")
-(package! smartparens :pin "f7cf316715e5018186c226aab8242c9e5ce131c8")
+(package! dtrt-indent :pin "a8aa356684804c52f26602d4e315f1306c6f3e59")
+(package! smartparens :pin "c7519a1b69f196050a13e2230b7532893b077086")
 (package! ws-butler :pin "e3a38d93e01014cd47bf5af4924459bd145fd7c4")
 
 ;; doom-projects.el
-(package! projectile :pin "0163b335a18af0f077a474d4dc6b36e22b5e3274")
-(package! project :pin "bf4c3cfcfbf3423d79170aa880a1abb332ed942e")
+(package! projectile :pin "8cc2ee8937b89f1639304cbd2526e85b17135372")
+(package! project :pin "5c77d78936364e2e6e9641af2091fde0bee729ce")
 
 ;; doom-keybinds.el
 (package! general :pin "826bf2b97a0fb4a34c5eb96ec2b172d682fd548f")
-(package! which-key :pin "ed389312170df955aaf10c2e120cc533ed5c509e")
+(package! which-key :pin "38d4308d1143b61e4004b6e7a940686784e51500")

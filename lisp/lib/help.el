@@ -97,10 +97,10 @@ selection of all minor-modes, active or not."
   (let ((symbol
          (cond ((stringp mode) (intern mode))
                ((symbolp mode) mode)
-               ((error "Expected a symbol/string, got a %s" (type-of mode))))))
-    (if (fboundp symbol)
-        (helpful-function symbol)
-      (helpful-variable symbol))))
+               ((error "Expected a symbol/string, got a %s" (type-of mode)))))
+        (fn (if (fboundp symbol) #'describe-function #'describe-variable)))
+    (funcall (or (command-remapping fn) fn)
+             symbol)))
 
 
 ;;
@@ -414,26 +414,44 @@ current file is in, or d) the module associated with the current major mode (see
            (doom-project-browse (file-name-directory path)))
           ((user-error "Aborted module lookup")))))
 
+(defun doom--help-variable-p (sym)
+  "TODO"
+  (or (get sym 'variable-documentation)
+      (and (boundp sym)
+           (not (keywordp sym))
+           (not (memq sym '(t nil))))))
+
 ;;;###autoload
 (defun doom/help-custom-variable (var)
   "Look up documentation for a custom variable.
 
-Unlike `helpful-variable', which casts a wider net that includes internal
-variables, this only lists variables that exist to be customized (defined with
-`defcustom')."
+Unlike `describe-variable' or `helpful-variable', which casts a wider net that
+includes internal variables, this only lists variables that exist to be
+customized (defined with `defcustom')."
   (interactive
-   (list (helpful--read-symbol
-          "Custom variable: "
-          (helpful--variable-at-point)
-          (lambda (sym)
-            (and (helpful--variable-p sym)
-                 (custom-variable-p sym)
-                 ;; Exclude minor mode state variables, which aren't meant to be
-                 ;; modified directly, but through their associated function.
-                 (not (or (and (string-suffix-p "-mode" (symbol-name sym))
-                               (fboundp sym))
-                          (eq (get sym 'custom-set) 'custom-set-minor-mode))))))))
-  (helpful-variable var))
+   (list
+    (intern (completing-read
+             "Custom variable: " obarray
+             (lambda (sym)
+               (and (doom--help-variable-p sym)
+                    (custom-variable-p sym)
+                    ;; Exclude minor mode state variables, which aren't meant to
+                    ;; be modified directly, but through their associated
+                    ;; function.
+                    (not (or (and (string-suffix-p "-mode" (symbol-name sym))
+                                  (fboundp sym))
+                             (eq (get sym 'custom-set) 'custom-set-minor-mode)))))
+             t nil nil (let ((var (variable-at-point)))
+                         ;; `variable-at-point' uses 0 rather than nil to
+                         ;; signify no symbol at point (presumably because 'nil
+                         ;; is a symbol).
+                         (unless (symbolp var)
+                           (setq var nil))
+                         (when (doom--help-variable-p var)
+                           var))))))
+  (funcall (or (command-remapping #'describe-variable)
+               #'describe-variable)
+           var))
 
 
 ;;
@@ -469,7 +487,8 @@ will open with point on that line."
   (let ((default-directory doom-emacs-dir))
     (split-string
      (cdr (doom-call-process
-           "rg" "--no-heading" "--line-number" "--iglob" "!*.org"
+           doom-ripgrep-executable
+           "--no-heading" "--line-number" "--iglob" "!*.org"
            (format "%s %s($| )"
                    "(^;;;###package|\\(after!|\\(use-package!)"
                    package)))
@@ -694,7 +713,7 @@ config blocks in your private config."
 (defvar counsel-rg-base-command)
 (defun doom--help-search (dirs query prompt)
   ;; REVIEW Replace with deadgrep
-  (unless (executable-find "rg")
+  (unless doom-ripgrep-executable
     (user-error "Can't find ripgrep on your system"))
   (cond ((fboundp 'consult--grep)
          (consult--grep prompt #'consult--ripgrep-make-builder (cons data-directory dirs) query))
@@ -708,7 +727,8 @@ config blocks in your private config."
         ;; () TODO Helm support?
         ((grep-find
           (string-join
-           (append (list "rg" "-L" "--search-zip" "--no-heading" "--color=never"
+           (append (list doom-ripgrep-executable
+                         "-L" "--search-zip" "--no-heading" "--color=never"
                          (shell-quote-argument query))
                    (mapcar #'shell-quote-argument dirs))
            " ")))))

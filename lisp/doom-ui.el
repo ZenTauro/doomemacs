@@ -1,6 +1,6 @@
 ;;; doom-ui.el --- defaults for Doom's aesthetics -*- lexical-binding: t; -*-
 ;;; Commentary:
-;;; Code;
+;;; Code:
 
 ;;
 ;;; Variables
@@ -212,7 +212,8 @@ windows, switch to `doom-fallback-buffer'. Otherwise, delegate to original
     (cond ((eq buf (doom-fallback-buffer))
            (message "Can't kill the fallback buffer.")
            t)
-          ((doom-real-buffer-p buf)
+          ((and (doom-real-buffer-p buf)
+                (run-hook-with-args-until-failure 'kill-buffer-query-functions))
            (let ((visible-p (delq (selected-window) (get-buffer-window-list buf nil t))))
              (unless visible-p
                (when (and (buffer-modified-p buf)
@@ -221,8 +222,10 @@ windows, switch to `doom-fallback-buffer'. Otherwise, delegate to original
                                         buf))))
                  (user-error "Aborted")))
              (let ((inhibit-redisplay t)
-                   buffer-list-update-hook)
-               (when (or ;; if there aren't more real buffers than visible buffers,
+                   buffer-list-update-hook
+                   kill-buffer-query-functions)
+               (when (or
+                      ;; if there aren't more real buffers than visible buffers,
                       ;; then there are no real, non-visible buffers left.
                       (not (cl-set-difference (doom-real-buffer-list)
                                               (doom-visible-buffers nil t)))
@@ -385,13 +388,14 @@ windows, switch to `doom-fallback-buffer'. Otherwise, delegate to original
       (unless hl-line-mode
         (setq-local doom--hl-line-mode nil))))
 
-  (add-hook! '(evil-visual-state-entry-hook activate-mark-hook)
+  ;; TODO: Use (de)activate-mark-hook in the absence of evil
+  (add-hook! 'evil-visual-state-entry-hook
     (defun doom-disable-hl-line-h ()
       (when hl-line-mode
         (hl-line-mode -1)
         (setq-local doom--hl-line-mode t))))
 
-  (add-hook! '(evil-visual-state-exit-hook deactivate-mark-hook)
+  (add-hook! 'evil-visual-state-exit-hook
     (defun doom-enable-hl-line-maybe-h ()
       (when doom--hl-line-mode
         (hl-line-mode +1)))))
@@ -534,7 +538,6 @@ windows, switch to `doom-fallback-buffer'. Otherwise, delegate to original
                    (nreverse new-specs)))
                 (put face 'face-modified nil))
             ('error
-             (ignore-errors (doom--reset-inhibited-vars-h))
              (if (string-prefix-p "Font not available" (error-message-string e))
                  (signal 'doom-font-error (list (font-get (cdr map) :family)))
                (signal (car e) (cdr e))))))
@@ -586,7 +589,19 @@ windows, switch to `doom-fallback-buffer'. Otherwise, delegate to original
           (setq doom-theme theme)
           (put 'doom-theme 'previous-themes (or last-themes 'none))
           ;; DEPRECATED Hook into `enable-theme-functions' when we target 29
-          (doom-run-hooks 'doom-load-theme-hook))))))
+          (doom-run-hooks 'doom-load-theme-hook)
+          ;; Fix incorrect fg/bg in new frames created after the initial frame
+          ;; (which are reroneously displayed as black).
+          (pcase-dolist (`(,param ,fn ,face)
+                         '((foreground-color face-foreground default)
+                           (background-color face-background default)
+                           (cursor-color face-background cursor)
+                           (border-color face-background border)
+                           (mouse-color face-background mouse)))
+            (when-let* ((color (funcall fn face nil t))
+                        ((stringp color))
+                        ((not (string-prefix-p "unspecified-" color))))
+              (setf (alist-get param default-frame-alist) color))))))))
 
 
 ;;
@@ -650,11 +665,11 @@ triggering hooks during startup."
   (fset 'set-fontset-font #'ignore))
 
 (after! whitespace
-  (defun doom-is-childframes-p ()
+  (defun doom--in-parent-frame-p ()
     "`whitespace-mode' inundates child frames with whitespace markers, so
 disable it to fix all that visual noise."
     (null (frame-parameter nil 'parent-frame)))
-  (add-function :before-while whitespace-enable-predicate #'doom-is-childframes-p))
+  (add-function :before-while whitespace-enable-predicate #'doom--in-parent-frame-p))
 
 (provide 'doom-ui)
 ;;; doom-ui.el ends here

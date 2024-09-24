@@ -52,24 +52,19 @@
 ;; quickly self-correct.
 (setq fast-but-imprecise-scrolling t)
 
-;; Don't ping things that look like domain names.
-(setq ffap-machine-p-known 'reject)
-
-;; Emacs "updates" its ui more often than it needs to, so slow it down slightly
-(setq idle-update-delay 1.0)  ; default is 0.5
-
 ;; Font compacting can be terribly expensive, especially for rendering icon
 ;; fonts on Windows. Whether disabling it has a notable affect on Linux and Mac
 ;; hasn't been determined, but do it anyway, just in case. This increases memory
 ;; usage, however!
 (setq inhibit-compacting-font-caches t)
 
-;; PGTK builds only: this timeout adds latency to frame operations, like
-;; `make-frame-invisible', which are frequently called without a guard because
-;; it's inexpensive in non-PGTK builds. Lowering the timeout from the default
-;; 0.1 should make childframes and packages that manipulate them (like `lsp-ui',
-;; `company-box', and `posframe') feel much snappier. See emacs-lsp/lsp-ui#613.
-(eval-when! (boundp 'pgtk-wait-for-event-timeout)
+;; PGTK builds only: there's a timeout that adds latency to frame operations,
+;; like `make-frame-invisible', which Emacs frequently calls without a guard
+;; because it's inexpensive in non-PGTK builds. Lowering the timeout from the
+;; default 0.1 should make childframes and packages that manipulate them (like
+;; `lsp-ui', `company-box', and `posframe') feel much snappier. See
+;; emacs-lsp/lsp-ui#613.
+(when (boundp 'pgtk-wait-for-event-timeout)
   (setq pgtk-wait-for-event-timeout 0.001))
 
 ;; Increase how much is read from processes in a single chunk (default is 4kb).
@@ -82,7 +77,7 @@
 
 ;; Performance on Windows is considerably worse than elsewhere. We'll need
 ;; everything we can get.
-(eval-when! (boundp 'w32-get-true-file-attributes)
+(when (boundp 'w32-get-true-file-attributes)
   (setq w32-get-true-file-attributes nil    ; decrease file IO workload
         w32-pipe-read-delay 0               ; faster IPC
         w32-pipe-buffer-size (* 64 1024)))  ; read more at a time (was 4K)
@@ -90,8 +85,8 @@
 ;; The GC introduces annoying pauses and stuttering into our Emacs experience,
 ;; so we use `gcmh' to stave off the GC while we're using Emacs, and provoke it
 ;; when it's idle. However, if the idle delay is too long, we run the risk of
-;; runaway memory usage in busy sessions. If it's too low, then we may as well
-;; not be using gcmh at all.
+;; runaway memory usage in busy sessions. And if it's too low, then we may as
+;; well not be using gcmh at all.
 (setq gcmh-idle-delay 'auto  ; default is 15s
       gcmh-auto-idle-delay-factor 10
       gcmh-high-cons-threshold (* 16 1024 1024))  ; 16mb
@@ -124,11 +119,10 @@
 ;;   disabling Emacs' menu-bar also makes MacOS treat Emacs GUI frames like
 ;;   non-application windows (e.g. it won't capture focus on activation, among
 ;;   other things), so the menu-bar should be preserved there.
-;;
 (when doom--system-macos-p
-  ;; NOTE: The correct way to disable this hack is to toggle `menu-bar-mode' (or
-  ;;   put it on a hook). Don't try to undo the hack below, as it may change
-  ;;   without warning, but will always respect `menu-bar-mode'.
+  ;; NOTE: Don't try to undo the hack below, as it may change without warning.
+  ;;   Instead, toggle `menu-bar-mode' (or put it on a hook) as normal. This
+  ;;   hack will always try to respect the state of `menu-bar-mode'.
   (setcdr (assq 'menu-bar-lines default-frame-alist) 'tty)
   (add-hook! 'after-make-frame-functions
     (defun doom--init-menu-bar-on-macos-h (&optional frame)
@@ -147,10 +141,6 @@
 ;; Emacs to its own devices there.
 (unless doom--system-windows-p
   (setq selection-coding-system 'utf-8))
-
-
-;;; Support for Doom-specific file extensions
-(add-to-list 'auto-mode-alist '("/\\.doom\\(?:rc\\|project\\|module\\|profile\\)\\'" . emacs-lisp-mode))
 
 
 ;;
@@ -322,6 +312,15 @@ If RETURN-P, return the message as a string instead of displaying it."
 (doom-run-hook-on 'doom-first-buffer-hook '(find-file-hook doom-switch-buffer-hook))
 (doom-run-hook-on 'doom-first-file-hook   '(find-file-hook dired-initial-position-hook))
 (doom-run-hook-on 'doom-first-input-hook  '(pre-command-hook))
+
+;; If the user's already opened something (e.g. with command-line arguments),
+;; then we should assume nothing about the user's intentions and simply treat
+;; this session as fully initialized.
+(add-hook! 'doom-after-init-hook :depth 100
+  (defun doom-run-first-hooks-if-files-open-h ()
+    (when file-name-history
+      (doom-run-hooks 'doom-first-file-hook 'doom-first-buffer-hook))))
+
 ;; PERF: Activate these later, otherwise they'll fire for every buffer created
 ;;   between now and the end of startup.
 (add-hook! 'after-init-hook
@@ -335,9 +334,8 @@ If RETURN-P, return the message as a string instead of displaying it."
 ;; TODO: Catch errors
 (load! (string-remove-suffix ".el" doom-module-init-file) doom-user-dir t)
 
-;;; Load the rest of $DOOMDIR + modules if noninteractive
 ;; If the user is loading this file from a batch script, let's assume they want
-;; to load their userland config as well.
+;; to load their userland config immediately.
 (when noninteractive
   (doom-require 'doom-profiles)
   (let ((init-file (doom-profile-init-file)))
@@ -349,6 +347,7 @@ If RETURN-P, return the message as a string instead of displaying it."
       (doom-load init-file 'noerror)
       (doom-initialize-packages))))
 
+
 ;;; Entry point
 ;; HACK: This advice hijacks Emacs' initfile loader to accomplish the following:
 ;;
@@ -357,8 +356,8 @@ If RETURN-P, return the message as a string instead of displaying it."
 ;;      and ~/_emacs) -- and spare us the IO of searching for them, and allows
 ;;      savvy hackers to use $EMACSDIR as their $DOOMDIR, if they wanted.
 ;;   3. Cut down on unnecessary logic in Emacs' bootstrapper.
-;;   4. Offer a more user-friendly error state/screen, especially for errors
-;;      emitted from Doom's core or the user's config.
+;;   4. TODO Offer a more user-friendly error state/screen, especially for
+;;      errors emitted from Doom's core or the user's config.
 (define-advice startup--load-user-init-file (:override (&rest _) init-doom 100)
   (let ((debug-on-error-from-init-file nil)
         (debug-on-error-should-be-set nil)
@@ -385,7 +384,15 @@ If RETURN-P, return the message as a string instead of displaying it."
               ;; the next file it loads into `user-init-file'.
               (setq user-init-file t)
               (when init-file-name
-                (load init-file-name 'noerror 'nomessage 'nosuffix))
+                (load init-file-name 'noerror 'nomessage 'nosuffix)
+                ;; HACK: if `init-file-name' happens to be higher in
+                ;;   `load-history' than a symbol's actual definition,
+                ;;   `symbol-file' (and help/helpful buffers) will report the
+                ;;   source of a symbol as `init-file-name', rather than it's
+                ;;   true source. By removing this file from `load-history', no
+                ;;   one will make that mistake.
+                (setq load-history (delete (assoc init-file-name load-history)
+                                           load-history)))
               ;; If it's still `t', then it failed to load the profile initfile.
               ;; This likely means the user has forgotten to run `doom sync'!
               (when (eq user-init-file t)
@@ -407,11 +414,10 @@ If RETURN-P, return the message as a string instead of displaying it."
          (display-warning
           'initialization
           (format-message "\
-An error occurred while loading `%s':\n\n%s%s%s\n\n\
+An error occurred while booting Doom Emacs:\n\n%s%s%s\n\n\
 To ensure normal operation, you should investigate and remove the
-cause of the error in your initialization file.  Start Emacs with
+cause of the error in your Doom config files. Start Emacs with
 the `--debug-init' option to view a complete error backtrace."
-                          user-init-file
                           (get (car error) 'error-message)
                           (if (cdr error) ": " "")
                           (mapconcat (lambda (s) (prin1-to-string s t))

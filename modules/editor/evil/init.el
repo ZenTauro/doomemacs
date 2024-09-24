@@ -2,6 +2,9 @@
 
 (defvar evil-collection-key-blacklist)
 
+;; must be set before evil/evil-collection is loaded
+(defvar evil-want-keybinding nil)
+
 ;; We load evil-collection ourselves for these reasons:
 ;;
 ;; 1. To truly lazy load it. Some of its modules, like
@@ -23,9 +26,7 @@
            (not (doom-context-p 'reload))
            (modulep! +everywhere))
 
-  (setq evil-collection-company-use-tng (modulep! :completion company +tng)
-        ;; must be set before evil/evil-collection is loaded
-        evil-want-keybinding nil)
+  (setq evil-collection-company-use-tng (modulep! :completion company +tng))
 
   (defvar +evil-collection-disabled-list
     '(anaconda-mode
@@ -42,6 +43,7 @@
       help
       image
       indent
+      kmacro
       kotlin-mode
       lispy
       outline
@@ -114,6 +116,7 @@ variable for an explanation of the defaults (in comments). See
       (csv "csv-mode")
       (custom cus-edit)
       cus-theme
+      dape
       dashboard
       daemons
       deadgrep
@@ -173,6 +176,7 @@ variable for an explanation of the defaults (in comments). See
       helpful
       hg-histedit
       hungry-delete
+      hyrolo
       ibuffer
       (image image-mode)
       image-dired
@@ -339,6 +343,9 @@ and complains if a module is loaded too early (during startup)."
       (+evil-collection-init 'replace))
     (add-transient-hook! 'indent-rigidly
       (+evil-collection-init '(indent "indent")))
+    (when (>= emacs-major-version 30)
+      (add-transient-hook! 'kmacro-menu-mode
+        (+evil-collection-init 'kmacro)))
     (add-transient-hook! 'minibuffer-setup-hook
       (when evil-collection-setup-minibuffer
         (+evil-collection-init 'minibuffer)
@@ -359,13 +366,4 @@ and complains if a module is loaded too early (during startup)."
     (dolist (mode evil-collection-mode-list)
       (dolist (req (or (cdr-safe mode) (list mode)))
         (with-eval-after-load req
-          (+evil-collection-init mode +evil-collection-disabled-list)))))
-
-  ;; HACK: The Diff options in `save-some-buffers's prompt should persist after
-  ;;   you quit view-mode, but evil-collection-view's bindings on q/Q break
-  ;;   this, so these are here to restore them.
-  ;; REVIEW: PR this upstream!
-  (map! :after (view evil-collection-view)
-        :map view-mode-map
-        :n "q" #'View-quit
-        :n "Q" #'View-quit-all))
+          (+evil-collection-init mode +evil-collection-disabled-list))))))

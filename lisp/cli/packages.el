@@ -13,9 +13,9 @@
 ;;
 ;;; Commands
 
-(defcli-obsolete! ((build b)) (sync "--rebuild") "v3.0.0")
+(defcli-obsolete! ((build b)) (sync "--rebuild") "3.0.0")
 
-(defcli-obsolete! ((purge p)) (gc) "v3.0.0")
+(defcli-obsolete! ((purge p)) (gc) "3.0.0")
 
 ;; TODO Rename to "doom gc" and move to its own file
 (defcli! (gc)
@@ -23,16 +23,15 @@
      (noelpa-p    ("-p" "--no-elpa")    "Don't purge ELPA packages")
      (norepos-p   ("-r" "--no-repos")   "Don't purge unused straight repos")
      (noeln-p     ("-e" "--no-eln")     "Don't purge old ELN bytecode")
-     (noregraft-p ("-g" "--no-regraft") "Regraft git repos (ie. compact them)"))
+     (noregraft-p ("-g" "--no-regraft") "Don't regraft git repos (ie. compact them)"))
   "Deletes orphaned packages & repos, and compacts them.
 
 Purges all installed ELPA packages (as they are considered temporary). Purges
-all orphaned package repos and builds. If -g/--regraft is supplied, the git
-repos among them will be regrafted and compacted to ensure they are as small as
-possible.
+all orphaned package repos and builds. Also regrafts and compacts package repos
+to ensure they are as small as possible.
 
-It is a good idea to occasionally run this doom purge -g to ensure your package
-list remains lean."
+It is a good idea to occasionally run this command to ensure your package list
+remains lean."
   :benchmark t
   (require 'comp nil t)
   (doom-initialize-core-packages)
@@ -121,16 +120,16 @@ list remains lean."
        nil (mapcar (doom-rpartial #'gethash straight--repo-cache)
                    (mapcar #'symbol-name straight-recipe-repositories)))
       (recipe package type local-repo)
-      (let ((esc (unless init-file-debug "\033[1A"))
+      (let ((esc (if init-file-debug "" "\033[1A"))
             (ref (straight-vc-get-commit type local-repo))
             newref output)
-        (print! (start "\033[KUpdating recipes for %s...%s") package esc)
+        (print! (start "\rUpdating recipes for %s...%s") package esc)
         (doom-packages--straight-with (straight-vc-fetch-from-remote recipe)
           (when .it
             (setq output .output)
             (straight-merge-package package)
             (unless (equal ref (setq newref (straight-vc-get-commit type local-repo)))
-              (print! (success "\033[K%s updated (%s -> %s)")
+              (print! (success "\r%s updated (%s -> %s)")
                       package
                       (doom-packages--abbrev-commit ref)
                       (doom-packages--abbrev-commit newref))
@@ -214,7 +213,7 @@ list remains lean."
                               (comp-async-runnings)))
            while (not (zerop pending))
            if (/= previous pending) do
-           (print! (start "\033[KNatively compiling %d files...\033[1A" pending))
+           (print! (start "\rNatively compiling %d files...\033[1A" pending))
            (setq previous pending
                  timer 0)
            else do
@@ -300,7 +299,8 @@ list remains lean."
                        (and (eq (car-safe build) :not)
                             (setq want-byte-compile (not want-byte-compile)
                                   want-native-compile (not want-native-compile)))
-                       (unless (featurep 'native-compile)
+                       (when (or (not (featurep 'native-compile))
+                                 (not straight--native-comp-available))
                          (setq want-native-compile nil))
                        (and (or want-byte-compile want-native-compile)
                             (or (file-newer-than-file-p repo-dir build-dir)
@@ -351,7 +351,8 @@ list remains lean."
                      (error
                       (signal 'doom-package-error (list package e)))))))
           (progn
-            (when (featurep 'native-compile)
+            (when (and (featurep 'native-compile)
+                       straight--native-comp-available)
               (doom-packages--compile-site-files)
               (doom-packages--wait-for-native-compile-jobs)
               (doom-packages--write-missing-eln-errors))
@@ -362,7 +363,7 @@ list remains lean."
             ;;   and causing a rebuild of those packages each time `doom sync'
             ;;   or similar is run, so we clean it up ourselves:
             (delete-directory (straight--modified-dir) 'recursive)
-            (print! (success "\033[KBuilt %d package(s)") (length built)))
+            (print! (success "\rBuilt %d package(s)") (length built)))
         (print! (item "No packages need attention"))
         nil))))
 
@@ -378,7 +379,7 @@ list remains lean."
          (packages-to-rebuild (make-hash-table :test 'equal))
          (repos-to-rebuild (make-hash-table :test 'equal))
          (total (length recipes))
-         (esc (unless init-file-debug "\033[1A"))
+         (esc (if init-file-debug "" "\033[1A"))
          (i 0))
     (if pinned-only-p
         (print! (start "Updating pinned packages..."))
@@ -411,7 +412,7 @@ list remains lean."
                    output)
                (or (cond
                     ((not (stringp target-ref))
-                     (print! (start "\033[K(%d/%d) Fetching %s...%s") i total package esc)
+                     (print! (start "\r(%d/%d) Fetching %s...%s") i total package esc)
                      (doom-packages--straight-with (straight-vc-fetch-from-remote recipe)
                        (when .it
                          (straight-merge-package package)
@@ -422,13 +423,13 @@ list remains lean."
                              (cl-return)))))
 
                     ((doom-packages--same-commit-p target-ref ref)
-                     (print! (item "\033[K(%d/%d) %s is up-to-date...%s") i total package esc)
+                     (print! (item "\r(%d/%d) %s is up-to-date...%s") i total package esc)
                      (cl-return))
 
                     ((if (straight-vc-commit-present-p recipe target-ref)
-                         (print! (start "\033[K(%d/%d) Checking out %s (%s)...%s")
+                         (print! (start "\r(%d/%d) Checking out %s (%s)...%s")
                                  i total package (doom-packages--abbrev-commit target-ref) esc)
-                       (print! (start "\033[K(%d/%d) Fetching %s...%s") i total package esc)
+                       (print! (start "\r(%d/%d) Fetching %s...%s") i total package esc)
                        (and (straight-vc-fetch-from-remote recipe)
                             (straight-vc-commit-present-p recipe target-ref)))
                      (straight-vc-check-out-commit recipe target-ref)
@@ -437,7 +438,7 @@ list remains lean."
                                commits (length (split-string output "\n" t))))
                      (doom-packages--same-commit-p target-ref (straight-vc-get-commit type local-repo)))
 
-                    ((print! (start "\033[K(%d/%d) Re-cloning %s...") i total local-repo esc)
+                    ((print! (start "\r(%d/%d) Re-cloning %s...") i total local-repo esc)
                      (let ((repo (straight--repos-dir local-repo))
                            (straight-vc-git-default-clone-depth 'full))
                        (delete-directory repo 'recursive)
@@ -448,7 +449,7 @@ list remains lean."
                              (setq output (doom-packages--commit-log-between ref target-ref)
                                    commits (length (split-string output "\n" t))))))))
                    (progn
-                     (print! (warn "\033[K(%d/%d) Failed to fetch %s")
+                     (print! (warn "\r(%d/%d) Failed to fetch %s")
                              i total local-repo)
                      (unless (string-empty-p output)
                        (print-group! (print! (item "%s" output))))
@@ -472,7 +473,7 @@ list remains lean."
                                 (add-to-rebuild (cdr tree))))))
                  (add-to-rebuild dependents)
                  (puthash package t packages-to-rebuild)
-                 (print! (success "\033[K(%d/%d) %s: %s -> %s%s%s")
+                 (print! (success "\r(%d/%d) %s: %s -> %s%s%s")
                          i total local-repo
                          (doom-packages--abbrev-commit ref)
                          (doom-packages--abbrev-commit target-ref)
@@ -495,15 +496,14 @@ list remains lean."
            (error
             (signal 'doom-package-error (list package e)))))))
     (print-group!
-     (princ "\033[K")
      (if (hash-table-empty-p packages-to-rebuild)
-         (ignore (print! (success "All %d packages are up-to-date") total))
+         (ignore (print! (success "\rAll %d packages are up-to-date") total))
        (doom-packages--cli-recipes-update)
        (straight--transaction-finalize)
        (let ((default-directory (straight--build-dir)))
          (mapc (doom-rpartial #'delete-directory 'recursive)
                (hash-table-keys packages-to-rebuild)))
-       (print! (success "Updated %d package(s)")
+       (print! (success "\rUpdated %d package(s)")
                (hash-table-count packages-to-rebuild))
        (doom-packages-ensure)
        t))))
@@ -532,22 +532,22 @@ list remains lean."
     (error "No repo specified for regrafting"))
   (let ((default-directory (straight--repos-dir repo)))
     (unless (file-directory-p ".git")
-      (print! (warn "\033[Krepos/%s is not a git repo, skipping" repo))
+      (print! (warn "\rrepos/%s is not a git repo, skipping" repo))
       (cl-return))
     (unless (file-in-directory-p default-directory straight-base-dir)
-      (print! (warn "\033[KSkipping repos/%s because it is local" repo))
+      (print! (warn "\rSkipping repos/%s because it is local" repo))
       (cl-return))
     (let ((before-size (doom-directory-size default-directory)))
       (doom-call-process "git" "reset" "--hard")
       (doom-call-process "git" "clean" "-ffd")
       (if (not (zerop (car (doom-call-process "git" "replace" "--graft" "HEAD"))))
-          (print! (item "\033[Krepos/%s is already compact\033[1A" repo))
+          (print! (item "\rrepos/%s is already compact\033[1A" repo))
         (doom-call-process "git" "reflog" "expire" "--expire=all" "--all")
         (doom-call-process "git" "gc" "--prune=now")
         (let ((after-size (doom-directory-size default-directory)))
           (if (equal after-size before-size)
-              (print! (success "\033[Krepos/%s cannot be compacted further" repo))
-            (print! (success "\033[KRegrafted repos/%s (from %0.1fKB to %0.1fKB)")
+              (print! (success "\rrepos/%s cannot be compacted further" repo))
+            (print! (success "\rRegrafted repos/%s (from %0.1fKB to %0.1fKB)")
                     repo before-size after-size)))))
     t))
 
@@ -559,9 +559,9 @@ list remains lean."
     (let ((before-size (doom-directory-size (straight--repos-dir))))
       (print-group!
        (prog1 (delq nil (mapcar #'doom-packages--regraft-repo repos))
-         (princ "\033[K")
+         ;; (princ "\r\033[K")
          (let ((after-size (doom-directory-size (straight--repos-dir))))
-           (print! (success "Finished regrafting. Size before: %0.1fKB and after: %0.1fKB (%0.1fKB)")
+           (print! (success "\rFinished regrafting. Size before: %0.1fKB and after: %0.1fKB (%0.1fKB)")
                    before-size after-size
                    (- after-size before-size))))))))
 
@@ -677,7 +677,7 @@ If ELPA-P, include packages installed with package.el (M-x package-install)."
 
 (defvar doom-cli--straight-auto-options
   '(("has diverged from"
-     . "^Reset [^ ]+ to branch")
+     . "^Reset [^ ]+ to ")
     ("but recipe specifies a URL of"
      . "Delete remote \"[^\"]+\", re-create it with correct URL")
     ("has a merge conflict:"
@@ -689,7 +689,7 @@ If ELPA-P, include packages installed with package.el (M-x package-install)."
     ("^In repository \"[^\"]+\", [^ ]+ (on branch \"[^\"]+\") is ahead of default branch \"[^\"]+\""
      . "^Checkout branch \"")
     ("^In repository "
-     . "^Reset branch \\|^Delete remote [^,]+, re-create it with correct URL\\|^Checkout \"main\""))
+     . "^Reset branch \\|^Delete remote [^,]+, re-create it with correct URL\\|^Checkout \""))
   "A list of regexps, mapped to regexps.
 
 Their CAR is tested against the prompt, and CDR is tested against the presented
@@ -703,6 +703,31 @@ original state.")
 ;; HACK Remove dired & magit options from prompt, since they're inaccessible in
 ;;      noninteractive sessions.
 (advice-add #'straight-vc-git--popup-raw :override #'straight--popup-raw)
+
+;; HACK: `native-comp' only respects `native-comp-jit-compilation-deny-list'
+;;   when native-compiling packages in interactive sessions. It ignores the
+;;   variable when, say, straight is building packages. This advice forces it to
+;;   obey it, even when used by straight (but only in the CLI).
+(defadvice! doom-cli--native--compile-async-skip-p (fn files &optional recursively load selector)
+  :around #'native-compile-async
+  (let (file-list)
+    (dolist (file-or-dir (ensure-list files))
+      (cond ((file-directory-p file-or-dir)
+             (dolist (file (if recursively
+                               (directory-files-recursively
+                                file-or-dir comp-valid-source-re)
+                             (directory-files file-or-dir
+                                              t comp-valid-source-re)))
+               (push file file-list)))
+            ((file-exists-p file-or-dir)
+             (push file-or-dir file-list))
+            ((signal 'native-compiler-error
+                     (list "Not a file nor directory" file-or-dir)))))
+    (funcall fn (seq-remove (lambda (file)
+                              (seq-some (lambda (re) (string-match-p re file))
+                                        native-comp-deferred-compilation-deny-list))
+                            file-list)
+             recursively load selector)))
 
 ;; HACK Replace GUI popup prompts (which hang indefinitely in tty Emacs) with
 ;;      simple prompts.
@@ -737,10 +762,12 @@ original state.")
       ;; We can't intercept C-g, so no point displaying any options for this key
       ;; when C-c is the proper way to abort batch Emacs.
       (delq! "C-g" actions 'assoc)
-      ;; HACK: These are associated with opening dired or magit, which isn't
-      ;;   possible in tty Emacs, so...
-      (delq! "e" actions 'assoc)
-      (delq! "g" actions 'assoc)
+      ;; HACK: Remove actions that don't work in noninteractive Emacs (like
+      ;;   opening dired or magit).
+      (setq actions
+            (cl-remove-if (lambda (o)
+                            (string-match-p "^\\(?:Magit\\|Dired\\)" (nth 1 o)))
+                          actions))
       (if (doom-cli-context-suppress-prompts-p doom-cli--context)
           (cl-loop for (_key desc func) in actions
                    when desc
@@ -830,6 +857,38 @@ However, in batch mode, print to stdout instead of stderr."
    (if (eq (cadr e) 'stringp)
        (error "Package was not properly cloned due to a connection failure, please try again later")
      (signal (car e) (cdr e))))))
+
+;; HACK: Fix an issue where straight wasn't byte-compiling some packages (or
+;;   some files in packages) due to missing (invisible) dependencies.
+(defadvice! doom-cli--straight-byte-compile-a (recipe)
+  "See https://github.com/radian-software/straight.el/pull/1132"
+  :override #'straight--build-compile
+  (let* ((pkg (plist-get recipe :package))
+         (dir (straight--build-dir pkg))
+         (emacs (concat invocation-directory invocation-name))
+         (buffer straight-byte-compilation-buffer)
+         (deps
+          (let (tmp)
+            (dolist (dep (straight--flatten (straight-dependencies pkg)) tmp)
+              (let ((build-dir (straight--build-dir dep)))
+                (when (file-exists-p build-dir)
+                  (push build-dir tmp))))))
+         (print-circle nil)
+         (print-length nil)
+         (program
+          (format "%S" `(let ((default-directory ,(straight--build-dir))
+                              (lp load-path))
+                          (setq load-path (list default-directory))
+                          (normal-top-level-add-subdirs-to-load-path)
+                          (setq load-path (append '(,dir) ',deps load-path lp))
+                          (byte-recompile-directory ,dir 0 'force))))
+         (args (list "-Q" "--batch" "--eval" program)))
+    (when buffer
+      (with-current-buffer (get-buffer-create buffer)
+        (insert (format "\n$ %s %s \\\n %S\n" emacs
+                        (string-join (butlast args) " ")
+                        program))))
+    (apply #'call-process `(,emacs nil ,buffer nil ,@args))))
 
 (provide 'doom-cli-packages)
 ;;; packages.el ends here

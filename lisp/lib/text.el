@@ -136,6 +136,19 @@ Uses `evil-visual-end' if available."
       (region-end)))
 
 ;;;###autoload
+(defun doom-region (&optional as-list)
+  "Return the bounds of the current seelction.
+
+If AS-LIST is non-nil, returns (BEG END). Otherwise returns a cons cell (BEG .
+END)."
+  (let* ((active (doom-region-active-p))
+         (beg (if active (doom-region-beginning)))
+         (end (if active (doom-region-end))))
+    (if as-list
+        (list beg end)
+      (cons beg end))))
+
+;;;###autoload
 (defun doom-thing-at-point-or-region (&optional thing prompt)
   "Grab the current selection, THING at point, or xref identifier at point.
 
@@ -355,7 +368,15 @@ editorconfig or dtrt-indent installed."
   (setq-local standard-indent width)
   (when (boundp 'evil-shift-width)
     (setq evil-shift-width width))
-  (cond ((require 'editorconfig nil t)
+  ;; REVIEW: Only use `editorconfig' once we drop 29.x support.
+  (cond ((let ((load-path (get 'load-path 'initial-value)))
+           ;; A built-in `editorconfig' package was added in Emacs 30.x, but
+           ;; with a different API. Since it's built in, prefer it over the
+           ;; upstream one, but we still need to adapt:
+           (require 'editorconfig nil t))
+         (pcase-dolist (`(,var . ,val) (editorconfig--default-indent-size-function width))
+           (set (make-local-variable var) val)))
+        ((require 'editorconfig nil t)
          (let (editorconfig-lisp-use-default-indent)
            (editorconfig-set-indentation nil width)))
         ((require 'dtrt-indent nil t)
@@ -363,7 +384,7 @@ editorconfig or dtrt-indent installed."
            (dolist (var (ensure-list vars))
              (doom-log "Updated %s = %d" var width)
              (set var width)))))
-  (message "Changed indentation to %d" width))
+  (message "Changed buffer's indent-size to %d" width))
 
 
 ;;

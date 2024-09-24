@@ -56,13 +56,13 @@ Is relative to `org-directory', unless it is absolute. Is used in Doom's default
   "Default, centralized target for org-capture templates.")
 
 (defvar +org-habit-graph-padding 2
-  "The padding added to the end of the consistency graph")
+  "The padding added to the end of the consistency graph.")
 
 (defvar +org-habit-min-width 30
-  "Hides the consistency graph if the `org-habit-graph-column' is less than this value")
+  "Hide the consistency graph if `org-habit-graph-column' is less than this.")
 
 (defvar +org-habit-graph-window-ratio 0.3
-  "The ratio of the consistency graphs relative to the window width")
+  "The ratio of the consistency graphs relative to the window width.")
 
 (defvar +org-startup-with-animated-gifs nil
   "If non-nil, and the cursor is over a gif inline-image preview, animate it!")
@@ -540,9 +540,9 @@ relative to `org-directory', unless it is an absolute path."
   ;; documentation -- especially Doom's!
   (letf! ((defun -call-interactively (fn)
             (lambda (path _prefixarg)
-              (funcall
-               fn (or (intern-soft path)
-                      (user-error "Can't find documentation for %S" path))))))
+              (funcall (or (command-remapping fn) fn)
+                       (or (intern-soft path)
+                           (user-error "Can't find documentation for %S" path))))))
     (org-link-set-parameters
      "kbd"
      :follow (lambda (ev)
@@ -553,12 +553,12 @@ relative to `org-directory', unless it is an absolute path."
      :face 'help-key-binding)
     (org-link-set-parameters
      "var"
-     :follow (-call-interactively #'helpful-variable)
+     :follow (-call-interactively #'describe-variable)
      :activate-func #'+org-link--var-link-activate-fn
      :face '(font-lock-variable-name-face underline))
     (org-link-set-parameters
      "fn"
-     :follow (-call-interactively #'helpful-callable)
+     :follow (-call-interactively #'describe-function)
      :activate-func #'+org-link--fn-link-activate-fn
      :face '(font-lock-function-name-face underline))
     (org-link-set-parameters
@@ -739,9 +739,6 @@ mutating hooks on exported output, like formatters."
   (add-to-list 'org-file-apps '(directory . emacs))
   (add-to-list 'org-file-apps '(remote . emacs))
 
-  ;; Open help:* links with helpful-* instead of describe-*
-  (advice-add #'org-link--open-help :around #'doom-use-helpful-a)
-
   ;; Some uses of `org-fix-tags-on-the-fly' occur without a check on
   ;; `org-auto-align-tags', such as in `org-self-insert-command' and
   ;; `org-delete-backward-char'.
@@ -790,31 +787,31 @@ via an indirect buffer."
 
   (defvar recentf-exclude)
   (defadvice! +org--optimize-backgrounded-agenda-buffers-a (fn file)
-    "Disable a lot of org-mode's startup processes for temporary agenda buffers.
+    "Disable `org-mode's startup processes for temporary agenda buffers.
 
-    This includes preventing them from polluting recentf.
-
-    However, if the user tries to visit one of these buffers they'll see a
-    gimped, half-broken org buffer. To avoid that, install a hook to restart
-    `org-mode' when they're switched to so they can grow up to be fully-fledged
-    org-mode buffers."
+Prevents recentf pollution as well. However, if the user tries to visit one of
+these buffers they'll see a gimped, half-broken org buffer, so to avoid that,
+install a hook to restart `org-mode' when they're switched to so they can grow
+up to be fully-fledged org-mode buffers."
     :around #'org-get-agenda-file-buffer
-    (let ((recentf-exclude (list (lambda (_file) t)))
-          (doom-inhibit-large-file-detection t)
-          org-startup-indented
-          org-startup-folded
-          vc-handled-backends
-          org-mode-hook
-          find-file-hook)
-      (let ((buf (funcall fn file)))
-        (if buf
-         (with-current-buffer buf
+    (if-let (buf (org-find-base-buffer-visiting file))
+        buf
+      (let ((recentf-exclude '(always))
+            (doom-inhibit-large-file-detection t)
+            (doom-inhibit-local-var-hooks t)
+            (org-inhibit-startup t)
+            vc-handled-backends
+            enable-local-variables
+            find-file-hook)
+        (when-let ((buf (delay-mode-hooks (funcall fn file))))
+          (with-current-buffer buf
             (add-hook 'doom-switch-buffer-hook #'+org--restart-mode-h
-                      nil 'local)))
-       buf)))
+                      nil 'local))
+          buf))))
 
   (defadvice! +org--fix-inconsistent-uuidgen-case-a (uuid)
-    "Ensure uuidgen is always lowercase (consistent) regardless of system."
+    "Ensure uuidgen is always lowercase (consistent) regardless of system.
+See https://lists.gnu.org/archive/html/emacs-orgmode/2019-07/msg00081.html."
     :filter-return #'org-id-new
     (if (eq org-id-method 'uuid)
         (downcase uuid)
@@ -845,7 +842,7 @@ between the two."
         ;; Recently, a [tab] keybind in `outline-mode-cycle-map' has begun
         ;; overriding org's [tab] keybind in GUI Emacs. This is needed to undo
         ;; that, and should probably be PRed to org.
-        [tab]        #'org-cycle
+        :ie [tab]    #'org-cycle
 
         "C-c C-S-l"  #'+org/remove-link
         "C-c C-i"    #'org-toggle-inline-images
@@ -864,9 +861,6 @@ between the two."
         ;; Org-aware C-a/C-e
         [remap doom/backward-to-bol-or-indent]          #'org-beginning-of-line
         [remap doom/forward-to-last-non-comment-or-eol] #'org-end-of-line
-
-        (:when (modulep! :completion vertico)
-          [remap imenu] #'consult-outline)
 
         :localleader
         "#" #'org-update-statistics-cookies
@@ -988,6 +982,7 @@ between the two."
          "s" #'org-store-link
          "S" #'org-insert-last-stored-link
          "t" #'org-toggle-link-display
+         "y" #'+org/yank-link
          (:when (modulep! :os macos)
           "g" #'org-mac-link-get-link))
         (:prefix ("P" . "publish")
@@ -1054,7 +1049,8 @@ between the two."
     '(("^\\*Org Links" :slot -1 :vslot -1 :size 2 :ttl 0)
       ("^ ?\\*\\(?:Agenda Com\\|Calendar\\|Org Export Dispatcher\\)"
        :slot -1 :vslot -1 :size #'+popup-shrink-to-fit :ttl 0)
-      ("^\\*Org \\(?:Select\\|Attach\\)" :slot -1 :vslot -2 :ttl 0 :size 0.25)
+      ("^\\*Org \\(?:Select\\|Attach\\|Table Edit\\)" :slot -1 :vslot -2 :ttl 0 :size 0.25)
+      ("^\\*Edit Formulas\\*$" :slot -1 :vslot -2 :ttl 0 :size 0.25)
       ("^\\*Org Agenda"     :ignore t)
       ("^\\*Org Src"        :size 0.42  :quit nil :select t :autosave t :modeline t :ttl nil)
       ("^\\*Org-Babel")
@@ -1125,6 +1121,15 @@ between the two."
   :hook (org-mode . org-eldoc-load)
   :init (setq org-eldoc-breadcrumb-separator " → ")
   :config
+  (defadvice! +org-eldoc--display-link-at-point-a (&rest _)
+    "Display help for doom-*: links in minibuffer when cursor/mouse is over it."
+    :before-until #'org-eldoc-documentation-function
+    (if-let ((url (thing-at-point 'url t)))
+        (format "LINK: %s" url)
+      (and (eq (get-text-property (point) 'help-echo)
+               #'+org-link-doom--help-echo-from-textprop)
+           (+org-link-doom--help-echo-from-textprop nil (current-buffer) (point)))))
+
   ;; HACK Fix #2972: infinite recursion when eldoc kicks in 'org' or 'python'
   ;;   src blocks.
   ;; TODO Should be reported upstream!
@@ -1192,22 +1197,26 @@ between the two."
       (map! :map evil-org-mode-map
             :ni [C-return]   #'+org/insert-item-below
             :ni [C-S-return] #'+org/insert-item-above
-            ;; navigate table cells (from insert-mode)
-            :i Cright (cmds! (org-at-table-p) #'org-table-next-field
-                             #'org-end-of-line)
-            :i Cleft  (cmds! (org-at-table-p) #'org-table-previous-field
-                             #'org-beginning-of-line)
-            :i Cup    (cmds! (org-at-table-p) #'+org/table-previous-row
-                             #'org-up-element)
-            :i Cdown  (cmds! (org-at-table-p) #'org-table-next-row
-                             #'org-down-element)
-            :ni CSright   #'org-shiftright
-            :ni CSleft    #'org-shiftleft
-            :ni CSup      #'org-shiftup
-            :ni CSdown    #'org-shiftdown
+            (:unless evil-disable-insert-state-bindings
+             :i Cright (cmds! (org-at-table-p) #'org-table-next-field
+                              #'org-end-of-line)
+             :i Cleft  (cmds! (org-at-table-p) #'org-table-previous-field
+                              #'org-beginning-of-line)
+             :i Cup    (cmds! (org-at-table-p) #'+org/table-previous-row
+                              #'org-up-element)
+             :i Cdown  (cmds! (org-at-table-p) #'org-table-next-row
+                              #'org-down-element)
+             :i CSright   #'org-shiftright
+             :i CSleft    #'org-shiftleft
+             :i CSup      #'org-shiftup
+             :i CSdown    #'org-shiftdown)
+            :n CSright    #'org-shiftright
+            :n CSleft     #'org-shiftleft
+            :n CSup       #'org-shiftup
+            :n CSdown     #'org-shiftdown
             ;; more intuitive RET keybinds
-            :n [return]   #'+org/dwim-at-point
-            :n "RET"      #'+org/dwim-at-point
+            :m [return]   #'+org/dwim-at-point
+            :m "RET"      #'+org/dwim-at-point
             :i [return]   #'+org/return
             :i "RET"      #'+org/return
             :i [S-return] #'+org/shift-return
